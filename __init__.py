@@ -121,6 +121,14 @@ def _ensure_notetype() -> None:
     tmpl["ord"] = 0
     tmpl["qfmt"], tmpl["afmt"] = _make_templates(tmpl)
 
+    # IO notetypes don't get Anki's built-in cloze CSS injected (since their
+    # .cloze elements are hidden shape data). Add it explicitly so Text1/Text2
+    # cloze blanks render with the standard blue-bold style.
+    new_nt["css"] = new_nt.get("css", "") + (
+        "\n.cloze { font-weight: bold; color: blue; }"
+        "\n.nightMode .cloze { color: lightblue; }"
+    )
+
     if hasattr(mm, "add_dict"):
         mm.add_dict(new_nt)
     else:
