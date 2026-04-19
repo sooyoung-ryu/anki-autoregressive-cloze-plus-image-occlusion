@@ -21,27 +21,26 @@ except Exception:
     _CLOZE_STOCK_KIND = 5  # fallback literal
 
 NOTETYPE_NAME = "Cloze + Image Occlusion"
-F_TEXT1 = "Text1"
-F_TEXT2 = "Text2"
+F_TEXT_BEFORE = "Text Before"
+F_CLOZE_BEFORE = "Cloze Before"
+F_TEXT_AFTER = "Text After"
+F_CLOZE_AFTER = "Cloze After"
+_NEW_FIELD_NAMES = (F_TEXT_BEFORE, F_CLOZE_BEFORE, F_TEXT_AFTER, F_CLOZE_AFTER)
 
 # ── Template helpers ──────────────────────────────────────────────────────
 
-# Visible divs are populated by our JS (from pre-rendered HTML sent from
-# Python), so that plain-text fields — which {{cloze:Field}} would render
-# empty — still show up. The hidden divs keep Text1/Text2 registered as
-# cloze fields so Anki generates cards from their cN markers too.
 _T1 = (
-    '{{#Text1}}<div id="ar-text1"></div>{{/Text1}}'
-    '<div style="display:none">{{cloze:Text1}}</div>\n'
+    '{{#Text Before}}<div>{{Text Before}}</div>{{/Text Before}}\n'
+    '{{#Cloze Before}}<div id="ar-text1">{{cloze:Cloze Before}}</div>{{/Cloze Before}}\n'
 )
 _T2 = (
-    '\n{{#Text2}}<div id="ar-text2"></div>{{/Text2}}'
-    '<div style="display:none">{{cloze:Text2}}</div>'
+    '\n{{#Text After}}<div>{{Text After}}</div>{{/Text After}}'
+    '\n{{#Cloze After}}<div id="ar-text2">{{cloze:Cloze After}}</div>{{/Cloze After}}'
 )
 
 
 def _inject_text_fields(fmt: str) -> str:
-    """Inject Text1 right before the IO container and Text2 right after the setup script."""
+    """Inject Before fields right before the IO container and After fields right after the setup script."""
     fmt = fmt.replace(
         '<div id="image-occlusion-container">',
         _T1 + '<div id="image-occlusion-container">',
@@ -69,28 +68,10 @@ def _is_our_notetype(card: Card) -> bool:
     return card.note_type().get("name") == NOTETYPE_NAME
 
 
-_CLOZE_RE = re.compile(r"\{\{c(\d+)::(.*?)\}\}", re.DOTALL)
-
-
 def _extract_cloze_texts(field_value: str, cloze_num: int) -> list[str]:
     """Return cN cloze answer texts in document order, with hints stripped."""
-    return [
-        m.group(2).split("::", 1)[0]
-        for m in _CLOZE_RE.finditer(field_value)
-        if int(m.group(1)) == cloze_num
-    ]
-
-
-def _render_cloze_field(field_value: str, cloze_num: int) -> str:
-    """Render field HTML: mask active cN as [hint] spans, inline inactive clozes."""
-    def _repl(m: re.Match) -> str:
-        n = int(m.group(1))
-        answer, _, hint = m.group(2).partition("::")
-        if n == cloze_num:
-            return f'<span class="cloze">[{hint or "..."}]</span>'
-        return answer
-
-    return _CLOZE_RE.sub(_repl, field_value)
+    pattern = re.compile(r"\{\{c" + str(cloze_num) + r"::(.*?)\}\}", re.DOTALL)
+    return [m.group(1).split("::")[0] for m in pattern.finditer(field_value)]
 
 
 # ── Notetype creation ─────────────────────────────────────────────────────
@@ -141,13 +122,13 @@ def _ensure_notetype() -> str:
     new_nt["usn"] = -1
 
     existing_names = {f["name"].lower() for f in new_nt["flds"]}
-    if F_TEXT1.lower() in existing_names or F_TEXT2.lower() in existing_names:
+    if any(n.lower() in existing_names for n in _NEW_FIELD_NAMES):
         return _FIELD_CONFLICT
 
-    text1 = mm.new_field(F_TEXT1)
-    new_nt["flds"].insert(0, text1)
-    text2 = mm.new_field(F_TEXT2)
-    new_nt["flds"].append(text2)
+    new_nt["flds"].insert(0, mm.new_field(F_CLOZE_BEFORE))
+    new_nt["flds"].insert(0, mm.new_field(F_TEXT_BEFORE))
+    new_nt["flds"].append(mm.new_field(F_TEXT_AFTER))
+    new_nt["flds"].append(mm.new_field(F_CLOZE_AFTER))
     for i, fld in enumerate(new_nt["flds"]):
         fld["ord"] = i
 
@@ -178,10 +159,11 @@ def _manual_setup() -> None:
             "type), then run this again."
         )
     elif status == _FIELD_CONFLICT:
+        names = ", ".join(f"'{n}'" for n in _NEW_FIELD_NAMES)
         tooltip(
             f"Cannot create '{NOTETYPE_NAME}': source Image Occlusion notetype "
-            f"already has a field named '{F_TEXT1}' or '{F_TEXT2}'. Rename those "
-            f"fields and retry."
+            f"already has one of the required field names ({names}). Rename the "
+            f"conflicting field and retry."
         )
 
 
@@ -205,16 +187,11 @@ def _on_question_shown(card: Card) -> None:
 
     cloze_num = card.ord + 1
     note = card.note()
-    text1_raw = note[F_TEXT1] if F_TEXT1 in note else ""
-    text2_raw = note[F_TEXT2] if F_TEXT2 in note else ""
+    before_texts = _extract_cloze_texts(note[F_CLOZE_BEFORE], cloze_num) if F_CLOZE_BEFORE in note else []
+    after_texts = _extract_cloze_texts(note[F_CLOZE_AFTER], cloze_num) if F_CLOZE_AFTER in note else []
 
     _active = True
-    payload = json.dumps({
-        "text1Html": _render_cloze_field(text1_raw, cloze_num),
-        "text2Html": _render_cloze_field(text2_raw, cloze_num),
-        "text1": _extract_cloze_texts(text1_raw, cloze_num),
-        "text2": _extract_cloze_texts(text2_raw, cloze_num),
-    })
+    payload = json.dumps({"text1": before_texts, "text2": after_texts})
     mw.reviewer.web.eval(f"arclozeio.init({payload});")
 
 
