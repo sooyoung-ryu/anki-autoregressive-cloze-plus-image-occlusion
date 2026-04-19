@@ -26,8 +26,18 @@ F_TEXT2 = "Text2"
 
 # ── Template helpers ──────────────────────────────────────────────────────
 
-_T1 = '{{#Text1}}<div id="ar-text1">{{cloze:Text1}}</div>{{/Text1}}\n'
-_T2 = '\n{{#Text2}}<div id="ar-text2">{{cloze:Text2}}</div>{{/Text2}}'
+# Visible divs are populated by our JS (from pre-rendered HTML sent from
+# Python), so that plain-text fields — which {{cloze:Field}} would render
+# empty — still show up. The hidden divs keep Text1/Text2 registered as
+# cloze fields so Anki generates cards from their cN markers too.
+_T1 = (
+    '{{#Text1}}<div id="ar-text1"></div>{{/Text1}}'
+    '<div style="display:none">{{cloze:Text1}}</div>\n'
+)
+_T2 = (
+    '\n{{#Text2}}<div id="ar-text2"></div>{{/Text2}}'
+    '<div style="display:none">{{cloze:Text2}}</div>'
+)
 
 
 def _inject_text_fields(fmt: str) -> str:
@@ -59,10 +69,28 @@ def _is_our_notetype(card: Card) -> bool:
     return card.note_type().get("name") == NOTETYPE_NAME
 
 
+_CLOZE_RE = re.compile(r"\{\{c(\d+)::(.*?)\}\}", re.DOTALL)
+
+
 def _extract_cloze_texts(field_value: str, cloze_num: int) -> list[str]:
     """Return cN cloze answer texts in document order, with hints stripped."""
-    pattern = re.compile(r"\{\{c" + str(cloze_num) + r"::(.*?)\}\}", re.DOTALL)
-    return [m.group(1).split("::")[0] for m in pattern.finditer(field_value)]
+    return [
+        m.group(2).split("::", 1)[0]
+        for m in _CLOZE_RE.finditer(field_value)
+        if int(m.group(1)) == cloze_num
+    ]
+
+
+def _render_cloze_field(field_value: str, cloze_num: int) -> str:
+    """Render field HTML: mask active cN as [hint] spans, inline inactive clozes."""
+    def _repl(m: re.Match) -> str:
+        n = int(m.group(1))
+        answer, _, hint = m.group(2).partition("::")
+        if n == cloze_num:
+            return f'<span class="cloze">[{hint or "..."}]</span>'
+        return answer
+
+    return _CLOZE_RE.sub(_repl, field_value)
 
 
 # ── Notetype creation ─────────────────────────────────────────────────────
@@ -177,11 +205,16 @@ def _on_question_shown(card: Card) -> None:
 
     cloze_num = card.ord + 1
     note = card.note()
-    text1_texts = _extract_cloze_texts(note[F_TEXT1], cloze_num) if F_TEXT1 in note else []
-    text2_texts = _extract_cloze_texts(note[F_TEXT2], cloze_num) if F_TEXT2 in note else []
+    text1_raw = note[F_TEXT1] if F_TEXT1 in note else ""
+    text2_raw = note[F_TEXT2] if F_TEXT2 in note else ""
 
     _active = True
-    payload = json.dumps({"text1": text1_texts, "text2": text2_texts})
+    payload = json.dumps({
+        "text1Html": _render_cloze_field(text1_raw, cloze_num),
+        "text2Html": _render_cloze_field(text2_raw, cloze_num),
+        "text1": _extract_cloze_texts(text1_raw, cloze_num),
+        "text2": _extract_cloze_texts(text2_raw, cloze_num),
+    })
     mw.reviewer.web.eval(f"arclozeio.init({payload});")
 
 

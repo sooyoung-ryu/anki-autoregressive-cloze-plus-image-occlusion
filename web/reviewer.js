@@ -159,6 +159,11 @@
             _phaseIdx = 0;
             _ioRevealed = 0;
             _ioHiddenTotal = -1;
+
+            var t1 = document.getElementById("ar-text1");
+            if (t1) t1.innerHTML = (payload && payload.text1Html) || "";
+            var t2 = document.getElementById("ar-text2");
+            if (t2) t2.innerHTML = (payload && payload.text2Html) || "";
         },
 
         revealNext: function () {
