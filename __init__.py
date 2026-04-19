@@ -22,8 +22,8 @@ F_TEXT2 = "Text2"
 
 # ── Template helpers ──────────────────────────────────────────────────────
 
-_T1 = '{{#Text1}}<div id="ar-text1" class="ar-field">{{cloze:Text1}}</div>{{/Text1}}\n'
-_T2 = '\n{{#Text2}}<div id="ar-text2" class="ar-field">{{cloze:Text2}}</div>{{/Text2}}'
+_T1 = '{{#Text1}}<div id="ar-text1">{{cloze:Text1}}</div>{{/Text1}}\n'
+_T2 = '\n{{#Text2}}<div id="ar-text2">{{cloze:Text2}}</div>{{/Text2}}'
 
 
 def _inject_text_fields(fmt: str) -> str:
@@ -45,11 +45,6 @@ def _inject_text_fields(fmt: str) -> str:
 
 def _make_templates(io_tmpl: dict) -> tuple[str, str]:
     return _inject_text_fields(io_tmpl["qfmt"]), _inject_text_fields(io_tmpl["afmt"])
-
-_EXTRA_CSS = """
-.ar-field { margin: 8px 0; line-height: 1.6; }
-.ar-revealed { font-weight: bold; }
-"""
 
 # ── State ──────────────────────────────────────────────────────────────────
 
@@ -125,8 +120,6 @@ def _ensure_notetype() -> None:
     tmpl = new_nt["tmpls"][0]
     tmpl["ord"] = 0
     tmpl["qfmt"], tmpl["afmt"] = _make_templates(tmpl)
-
-    new_nt["css"] = new_nt.get("css", "") + _EXTRA_CSS
 
     if hasattr(mm, "add_dict"):
         mm.add_dict(new_nt)

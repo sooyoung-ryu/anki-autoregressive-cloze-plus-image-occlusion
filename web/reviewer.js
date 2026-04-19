@@ -117,17 +117,16 @@
     }
 
     function _text1Spans() {
-        return document.querySelectorAll("#ar-text1 span.cloze");
+        return document.querySelectorAll("#ar-text1 .cloze");
     }
 
     function _text2Spans() {
-        return document.querySelectorAll("#ar-text2 span.cloze");
+        return document.querySelectorAll("#ar-text2 .cloze");
     }
 
     function _revealSpan(span, text) {
         if (!span) return;
         span.innerHTML = text;
-        span.classList.add("ar-revealed");
         if (typeof MathJax !== "undefined") MathJax.typesetPromise([span]);
     }
 
