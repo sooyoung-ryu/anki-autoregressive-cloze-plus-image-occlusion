@@ -32,5 +32,3 @@ After the last item is revealed, the answer is shown automatically.
 **Step 2:** Install this add-on. The `Cloze + Image Occlusion` note type is created automatically on the next Anki startup.
 
 If the note type was not created automatically, go to **Tools > Setup 'Cloze + Image Occlusion' Note Type**.
-
-**Manual install:** Download `arclozeio.ankiaddon` from the releases page and open it with Anki (File > Install Add-on).

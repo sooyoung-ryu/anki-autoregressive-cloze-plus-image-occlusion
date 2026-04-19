@@ -20,31 +20,17 @@ NOTETYPE_NAME = "Cloze + Image Occlusion"
 F_TEXT1 = "Text1"
 F_TEXT2 = "Text2"
 
-# ── Template — based on Anki's stock IO template, with Text1/Text2 added ──
+# ── Template helpers ──────────────────────────────────────────────────────
 
-_QFMT = """\
-{{#Text1}}<div id="ar-text1" class="ar-field">{{cloze:Text1}}</div>{{/Text1}}
-{{#Header}}<div>{{{Header}}}</div>{{/Header}}
-<div style="display: none">{{cloze:Occlusions}}</div>
-<div id="err"></div>
-<div id="image-occlusion-container">
-    {{{Image}}}
-    <canvas id="image-occlusion-canvas"></canvas>
-</div>
-<script>
-try {
-    anki.imageOcclusion.setup();
-} catch (exc) {
-    document.getElementById("err").innerHTML = `Error: ${exc}`;
-}
-</script>
-{{#Text2}}<div id="ar-text2" class="ar-field">{{cloze:Text2}}</div>{{/Text2}}
-"""
+_T1 = '{{#Text1}}<div id="ar-text1" class="ar-field">{{cloze:Text1}}</div>{{/Text1}}\n'
+_T2 = '\n{{#Text2}}<div id="ar-text2" class="ar-field">{{cloze:Text2}}</div>{{/Text2}}'
 
-_AFMT = _QFMT + """\
-<div><button id="toggle">Toggle Masks</button></div>
-{{#Back Extra}}<div>{{{Back Extra}}}</div>{{/Back Extra}}
-"""
+
+def _make_templates(io_tmpl: dict) -> tuple[str, str]:
+    """Wrap the cloned IO template's qfmt/afmt with Text1 before and Text2 after."""
+    qfmt = _T1 + io_tmpl["qfmt"] + _T2
+    afmt = _T1 + io_tmpl["afmt"] + _T2
+    return qfmt, afmt
 
 _EXTRA_CSS = """
 .ar-field { margin: 8px 0; line-height: 1.6; }
@@ -124,8 +110,7 @@ def _ensure_notetype() -> None:
 
     tmpl = new_nt["tmpls"][0]
     tmpl["ord"] = 0
-    tmpl["qfmt"] = _QFMT
-    tmpl["afmt"] = _AFMT
+    tmpl["qfmt"], tmpl["afmt"] = _make_templates(tmpl)
 
     new_nt["css"] = new_nt.get("css", "") + _EXTRA_CSS
 
