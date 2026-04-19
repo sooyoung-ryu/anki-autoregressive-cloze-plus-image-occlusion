@@ -13,8 +13,12 @@ try:
     _IO_STOCK_KIND = (
         StockNotetype.OriginalStockKind.ORIGINAL_STOCK_KIND_IMAGE_OCCLUSION
     )
+    _CLOZE_STOCK_KIND = (
+        StockNotetype.OriginalStockKind.ORIGINAL_STOCK_KIND_CLOZE
+    )
 except Exception:
     _IO_STOCK_KIND = 6  # fallback literal
+    _CLOZE_STOCK_KIND = 5  # fallback literal
 
 NOTETYPE_NAME = "Cloze + Image Occlusion"
 F_TEXT1 = "Text1"
@@ -64,6 +68,19 @@ def _extract_cloze_texts(field_value: str, cloze_num: int) -> list[str]:
 # ── Notetype creation ─────────────────────────────────────────────────────
 
 
+def _find_stock_cloze_notetype():
+    """Return the user's stock Cloze notetype."""
+    for nt in mw.col.models.all():
+        if nt.get("originalStockKind") == _CLOZE_STOCK_KIND:
+            return nt
+    return mw.col.models.by_name("Cloze")  # fallback for older Anki
+
+
+def _get_cloze_css() -> str:
+    nt = _find_stock_cloze_notetype()
+    return nt.get("css", "") if nt else ""
+
+
 def _find_stock_io_notetype():
     """Return the first notetype with IMAGE_OCCLUSION stock kind (excluding ours)."""
     for nt in mw.col.models.all():
@@ -74,41 +91,30 @@ def _find_stock_io_notetype():
     return None
 
 
-def _try_create_stock_io_notetype() -> bool:
-    """Trigger Anki backend to add the stock IO notetype if missing."""
-    try:
-        # Anki's backend exposes this; the exact method varies by version.
-        from anki.stdmodels import get_stock_notetypes
-        for (name, func) in get_stock_notetypes(mw.col):
-            # Identify the IO entry by name match (localized) or by inspecting result
-            try:
-                nt = func(mw.col)
-                if nt.get("originalStockKind") == _IO_STOCK_KIND:
-                    mw.col.models.add_dict(nt) if hasattr(mw.col.models, "add_dict") else mw.col.models.add(nt)
-                    return True
-            except Exception:
-                continue
-    except Exception:
-        pass
-    return False
+# Result codes returned by _ensure_notetype for _manual_setup to act on.
+_OK = "ok"
+_ALREADY_EXISTS = "already_exists"
+_NO_IO = "no_io"
+_FIELD_CONFLICT = "field_conflict"
 
 
-def _ensure_notetype() -> None:
+def _ensure_notetype() -> str:
     mm = mw.col.models
     if mm.by_name(NOTETYPE_NAME):
-        return
+        return _ALREADY_EXISTS
 
     io_nt = _find_stock_io_notetype()
     if io_nt is None:
-        _try_create_stock_io_notetype()
-        io_nt = _find_stock_io_notetype()
-    if io_nt is None:
-        return  # user hasn't initialized IO yet; will retry on next profile open
+        return _NO_IO  # user hasn't initialized IO yet; will retry on next profile open
 
     new_nt = copy.deepcopy(io_nt)
     new_nt["id"] = 0
     new_nt["name"] = NOTETYPE_NAME
     new_nt["usn"] = -1
+
+    existing_names = {f["name"].lower() for f in new_nt["flds"]}
+    if F_TEXT1.lower() in existing_names or F_TEXT2.lower() in existing_names:
+        return _FIELD_CONFLICT
 
     text1 = mm.new_field(F_TEXT1)
     new_nt["flds"].insert(0, text1)
@@ -121,34 +127,33 @@ def _ensure_notetype() -> None:
     tmpl["ord"] = 0
     tmpl["qfmt"], tmpl["afmt"] = _make_templates(tmpl)
 
-    # IO notetypes don't get Anki's built-in cloze CSS injected (since their
-    # .cloze elements are hidden shape data). Add it explicitly so Text1/Text2
-    # cloze blanks render with the standard blue-bold style.
-    new_nt["css"] = new_nt.get("css", "") + (
-        "\n.cloze { font-weight: bold; color: blue; }"
-        "\n.nightMode .cloze { color: lightblue; }"
-    )
+    cloze_css = _get_cloze_css()
+    if cloze_css:
+        new_nt["css"] = new_nt.get("css", "") + "\n" + cloze_css
 
-    if hasattr(mm, "add_dict"):
-        mm.add_dict(new_nt)
-    else:
-        mm.add(new_nt)
+    mm.add_dict(new_nt)
+    return _OK
 
 
 gui_hooks.profile_did_open.append(_ensure_notetype)
 
 
 def _manual_setup() -> None:
-    if mw.col.models.by_name(NOTETYPE_NAME):
-        tooltip(f"'{NOTETYPE_NAME}' already exists.")
-        return
-    _ensure_notetype()
-    if mw.col.models.by_name(NOTETYPE_NAME):
+    status = _ensure_notetype()
+    if status == _OK:
         tooltip(f"Created '{NOTETYPE_NAME}' note type.")
-    else:
+    elif status == _ALREADY_EXISTS:
+        tooltip(f"'{NOTETYPE_NAME}' already exists.")
+    elif status == _NO_IO:
         tooltip(
             "Create one Image Occlusion note first (to initialize the IO note "
             "type), then run this again."
+        )
+    elif status == _FIELD_CONFLICT:
+        tooltip(
+            f"Cannot create '{NOTETYPE_NAME}': source Image Occlusion notetype "
+            f"already has a field named '{F_TEXT1}' or '{F_TEXT2}'. Rename those "
+            f"fields and retry."
         )
 
 
@@ -180,7 +185,8 @@ def _on_question_shown(card: Card) -> None:
     mw.reviewer.web.eval(f"arclozeio.init({payload});")
 
 
-def _on_answer_shown(card: Card) -> None:
+def _on_answer_shown(card: Card) -> None:  # noqa: ARG001
+    del card
     global _active
     _active = False
 

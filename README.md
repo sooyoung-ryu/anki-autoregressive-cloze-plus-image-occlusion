@@ -6,7 +6,7 @@ Combines cloze deletions and image occlusion in a single note, with autoregressi
 
 A note has three sections displayed in order:
 
-1. **Text1** — cloze text before the image (e.g. `The mitochondria is the {{c1::powerhouse}} of the cell`)
+1. **Text1** — cloze text before the image
 2. **Image** — an image with occlusion masks, edited with Anki's built-in Image Occlusion editor
 3. **Text2** — cloze text after the image
 
