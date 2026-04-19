@@ -26,11 +26,25 @@ _T1 = '{{#Text1}}<div id="ar-text1" class="ar-field">{{cloze:Text1}}</div>{{/Tex
 _T2 = '\n{{#Text2}}<div id="ar-text2" class="ar-field">{{cloze:Text2}}</div>{{/Text2}}'
 
 
+def _inject_text_fields(fmt: str) -> str:
+    """Inject Text1 right before the IO container and Text2 right after the setup script."""
+    fmt = fmt.replace(
+        '<div id="image-occlusion-container">',
+        _T1 + '<div id="image-occlusion-container">',
+        1,
+    )
+    fmt = re.sub(
+        r'(anki\.imageOcclusion\.setup\(\);.*?</script>)',
+        r'\1' + _T2,
+        fmt,
+        count=1,
+        flags=re.DOTALL,
+    )
+    return fmt
+
+
 def _make_templates(io_tmpl: dict) -> tuple[str, str]:
-    """Wrap the cloned IO template's qfmt/afmt with Text1 before and Text2 after."""
-    qfmt = _T1 + io_tmpl["qfmt"] + _T2
-    afmt = _T1 + io_tmpl["afmt"] + _T2
-    return qfmt, afmt
+    return _inject_text_fields(io_tmpl["qfmt"]), _inject_text_fields(io_tmpl["afmt"])
 
 _EXTRA_CSS = """
 .ar-field { margin: 8px 0; line-height: 1.6; }
