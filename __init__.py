@@ -1,6 +1,8 @@
 import copy
 import json
 import re
+from pathlib import Path
+from urllib.parse import unquote
 
 import aqt.reviewer
 from anki.cards import Card
@@ -26,6 +28,7 @@ F_CLOZE_BEFORE = "Cloze Before"
 F_TEXT_AFTER = "Text After"
 F_CLOZE_AFTER = "Cloze After"
 _NEW_FIELD_NAMES = (F_TEXT_BEFORE, F_CLOZE_BEFORE, F_TEXT_AFTER, F_CLOZE_AFTER)
+_review_active = False
 
 # ── Template helpers ──────────────────────────────────────────────────────
 
@@ -59,19 +62,23 @@ def _inject_text_fields(fmt: str) -> str:
 def _make_templates(io_tmpl: dict) -> tuple[str, str]:
     return _inject_text_fields(io_tmpl["qfmt"]), _inject_text_fields(io_tmpl["afmt"])
 
-# ── State ──────────────────────────────────────────────────────────────────
-
-_active = False
-
-
 def _is_our_notetype(card: Card) -> bool:
     return card.note_type().get("name") == NOTETYPE_NAME
 
 
 def _extract_cloze_texts(field_value: str, cloze_num: int) -> list[str]:
-    """Return cN cloze answer texts in document order, with hints stripped."""
-    pattern = re.compile(r"\{\{c" + str(cloze_num) + r"::(.*?)\}\}", re.DOTALL)
-    return [m.group(1).split("::")[0] for m in pattern.finditer(field_value)]
+    """Return active cloze answer texts in document order, with hints stripped."""
+    pattern = re.compile(r"\{\{c([\d,]+)::(.*?)\}\}", re.DOTALL)
+    texts = []
+    for match in pattern.finditer(field_value):
+        ordinals = {
+            int(part)
+            for part in match.group(1).split(",")
+            if part.isdigit()
+        }
+        if cloze_num in ordinals:
+            texts.append(match.group(2).split("::")[0])
+    return texts
 
 
 # ── Notetype creation ─────────────────────────────────────────────────────
@@ -105,6 +112,8 @@ _OK = "ok"
 _ALREADY_EXISTS = "already_exists"
 _NO_IO = "no_io"
 _FIELD_CONFLICT = "field_conflict"
+_DUMP_PATH = Path("/tmp/arclozeio-question-dump.json")
+_DEBUG_LOG_PATH = Path("/tmp/arclozeio-debug-log.jsonl")
 
 
 def _ensure_notetype() -> str:
@@ -180,25 +189,31 @@ gui_hooks.main_window_did_init.append(_add_menu_action)
 
 
 def _on_question_shown(card: Card) -> None:
-    global _active
-    _active = False
+    global _review_active
+    _review_active = False
     if not _is_our_notetype(card):
         return
+    for path in (_DUMP_PATH, _DEBUG_LOG_PATH):
+        try:
+            path.unlink(missing_ok=True)
+        except Exception:
+            pass
 
     cloze_num = card.ord + 1
     note = card.note()
     before_texts = _extract_cloze_texts(note[F_CLOZE_BEFORE], cloze_num) if F_CLOZE_BEFORE in note else []
     after_texts = _extract_cloze_texts(note[F_CLOZE_AFTER], cloze_num) if F_CLOZE_AFTER in note else []
 
-    _active = True
     payload = json.dumps({"text1": before_texts, "text2": after_texts})
     mw.reviewer.web.eval(f"arclozeio.init({payload});")
+    _review_active = True
 
 
 def _on_answer_shown(card: Card) -> None:  # noqa: ARG001
-    del card
-    global _active
-    _active = False
+    global _review_active
+    _review_active = False
+    if _is_our_notetype(card):
+        mw.reviewer.web.eval("arclozeio.disable();")
 
 
 def _on_shortcuts_will_change(state: str, shortcuts: list) -> None:
@@ -209,7 +224,7 @@ def _on_shortcuts_will_change(state: str, shortcuts: list) -> None:
             original_fn = fn
 
             def space_handler(orig=original_fn) -> None:
-                if _active:
+                if _review_active:
                     mw.reviewer.web.eval("arclozeio.revealNext();")
                 else:
                     orig()
@@ -218,20 +233,52 @@ def _on_shortcuts_will_change(state: str, shortcuts: list) -> None:
             break
 
 
-def _on_js_message(handled: tuple, message: str, context) -> tuple:
-    if isinstance(context, aqt.reviewer.Reviewer) and message == "arShowAnswer":
-        global _active
-        _active = False
-        mw.reviewer._getTypedAnswer()
-        return (True, None)
-    return handled
-
-
 def _on_webview_will_set_content(web_content, context) -> None:
     if not isinstance(context, aqt.reviewer.Reviewer):
         return
     pkg = mw.addonManager.addonFromModule(__name__)
     web_content.js.append(f"/_addons/{pkg}/web/reviewer.js")
+
+
+def _on_js_message(handled: tuple, message: str, context) -> tuple:
+    if not isinstance(context, aqt.reviewer.Reviewer):
+        return handled
+    if message.startswith("arclozeioLog:"):
+        payload = unquote(message.removeprefix("arclozeioLog:"))
+        try:
+            data = json.loads(payload)
+        except Exception as exc:
+            tooltip(f"Failed to decode arclozeio log: {exc}")
+            return (True, None)
+
+        try:
+            with _DEBUG_LOG_PATH.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(data, ensure_ascii=False) + "\n")
+        except Exception as exc:
+            tooltip(f"Failed to append debug log: {exc}")
+            return (True, None)
+        return (True, None)
+    if not message.startswith("arclozeioDump:"):
+        return handled
+
+    payload = unquote(message.removeprefix("arclozeioDump:"))
+    try:
+        data = json.loads(payload)
+    except Exception as exc:
+        tooltip(f"Failed to decode arclozeio dump: {exc}")
+        return (True, None)
+
+    try:
+        _DUMP_PATH.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        tooltip(f"Failed to write dump file: {exc}")
+        return (True, None)
+
+    tooltip(f"Saved arclozeio question dump to {_DUMP_PATH}")
+    return (True, None)
 
 
 mw.addonManager.setWebExports(__name__, r"web/.*\.js")
