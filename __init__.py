@@ -126,8 +126,10 @@ def _configure_combined_notetype(nt: dict) -> None:
             "required field names"
         )
 
-    nt["flds"].insert(0, mm.new_field(F_CLOZE_BEFORE))
-    nt["flds"].insert(0, mm.new_field(F_TEXT_BEFORE))
+    # Insert after Image (index 0) so Image stays at 0 — Anki's IO editor
+    # rejects the note if fields[0] is empty, which Text Before would be.
+    nt["flds"].insert(1, mm.new_field(F_CLOZE_BEFORE))
+    nt["flds"].insert(1, mm.new_field(F_TEXT_BEFORE))
     nt["flds"].append(mm.new_field(F_TEXT_AFTER))
     nt["flds"].append(mm.new_field(F_CLOZE_AFTER))
     for i, fld in enumerate(nt["flds"]):
